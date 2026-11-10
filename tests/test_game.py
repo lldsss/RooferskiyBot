@@ -54,9 +54,8 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_temporary_item_lifecycle(self):
         import time
-        from database.admin import create_item, toggle_item
+        from database.admin import create_item
         from database.base import Item
-        from sqlalchemy import select
         from bot.keyboards import shop
         data = dict(name='Тестовый', description='Тест', price=5, cd=-60,
                     prim=-0.1, lvl=1, duration=3600, sale_hours=1)
@@ -141,3 +140,88 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await state.get_state())
         self.assertEqual(await state.get_data(), {})
         await storage.close()
+
+    async def test_ranking_and_maximum_level(self):
+        await rq.set_user(456, 'Second')
+        await rq.update_xp(123, 20)
+        await rq.update_xp(456, 50)
+        self.assertEqual([row['xp'] for row in await rq.top()], [50, 20])
+        async with async_session() as session:
+            user = await session.get(User, 123)
+            user.level = 10
+            await session.commit()
+        self.assertIs(await rq.update_level(123), False)
+        self.assertIs(await rq.update_level(999), False)
+
+    async def test_paid_item_replay_and_second_payment(self):
+        import time
+        from types import SimpleNamespace
+        payment = SimpleNamespace(telegram_payment_charge_id='charge-1',
+                                  invoice_payload='boltorez', currency='XTR', total_amount=20)
+        self.assertTrue(await rq.fulfill_payment(123, payment))
+        async with async_session() as session:
+            before = dict((await session.get(User, 123)).items)
+        self.assertFalse(await rq.fulfill_payment(123, payment))
+        async with async_session() as session:
+            self.assertEqual((await session.get(User, 123)).items, before)
+        payment.telegram_payment_charge_id = 'charge-2'
+        self.assertTrue(await rq.fulfill_payment(123, payment))
+        async with async_session() as session:
+            user = await session.get(User, 123)
+            self.assertAlmostEqual(user.items['boltorez'] - before['boltorez'], 86400)
+            self.assertEqual(user.cd_items, -600)
+        payment.telegram_payment_charge_id = 'charge-3'
+        payment.total_amount = 1
+        with self.assertRaises(ValueError):
+            await rq.fulfill_payment(123, payment)
+        self.assertGreater(time.time(), before['boltorez'])
+
+    async def test_legacy_inventory_and_expiry_before_roof(self):
+        import time
+        async with async_session() as session:
+            user = await session.get(User, 123)
+            user.items = {'болторез': time.time() - 86401, 'рюкзак': time.time()}
+            user.cd_items = -9999
+            await session.commit()
+        _, result = await roof(123)
+        self.assertIsNotNone(result)
+        async with async_session() as session:
+            user = await session.get(User, 123)
+            self.assertEqual(list(user.items), ['backpack'])
+            self.assertEqual(user.cd_items, -300)
+
+    async def test_boost_keeps_required_object_reachable(self):
+        from unittest.mock import patch
+        from database.base import Object
+        await rq.bought_item(123, 'listik')
+        async with async_session() as session:
+            obj = await session.get(Object, 'ЖК Богородский')
+            obj.prim = 0
+            await session.commit()
+        def choose(objects, **kwargs):
+            return [next(obj for obj in objects if obj.name == 'ЖК Богородский')]
+        with patch('bot.services.random.choices', side_effect=choose):
+            _, result = await roof(123)
+        self.assertTrue(result['status'])
+        self.assertTrue((await rq.get_user_info(123))['object_status'])
+
+    def test_event_input_limits(self):
+        from bot.config import validate_event_value
+        for value in ('nan', 'inf', '-inf', '1.2.3', '', '1000'):
+            self.assertFalse(validate_event_value('prim_event', value))
+        self.assertTrue(validate_event_value('prim_event', '-0.2'))
+        self.assertFalse(validate_event_value('name', ' '))
+        self.assertFalse(validate_event_value('description', 'x' * 1001))
+
+    async def test_old_item_schema_migration(self):
+        from sqlalchemy import text
+        async with engine.begin() as conn:
+            await conn.execute(text('DROP TABLE items'))
+            await conn.execute(text('''CREATE TABLE items (
+                name VARCHAR(255) PRIMARY KEY, key VARCHAR(255), description VARCHAR(255),
+                price INTEGER, "limit" INTEGER, cd INTEGER, prim FLOAT, lvl INTEGER)'''))
+            await conn.execute(text('''INSERT INTO items VALUES ('старый', 'old', 'описание', 10, 0, -60, 0, 0)'''))
+        await base_run()
+        item = await rq.get_item('old')
+        self.assertEqual(item['duration'], 86400)
+        self.assertTrue(item['available'])

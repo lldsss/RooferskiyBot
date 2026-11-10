@@ -5,9 +5,8 @@ from asyncio import Lock
 from typing import Any
 
 from sqlalchemy import select, delete, text
-from sqlalchemy.dialects.sqlite import insert
 
-from database.base import async_session, User, Chat, Channel, Event, Level, Item, Code, Object
+from database.base import async_session, User, Chat, Channel, Event, Level, Item, Code, Object, Payment
 from bot.config import TEST_ID, OBJECTS, STANDARD_ITEMS
 
 from weakref import WeakValueDictionary
@@ -23,9 +22,10 @@ def lock_user(user_id: int) -> Lock:
     return lock
 
 
-async def execute_db_operation(operation, *args, **kwargs) -> Any:
+async def execute_db_operation(operation, *args, write=True, **kwargs) -> Any:
     async with async_session() as session:
-        await session.execute(text("BEGIN IMMEDIATE"))
+        if write:
+            await session.execute(text("BEGIN IMMEDIATE"))
         return await operation(session, *args, **kwargs)
 
 
@@ -75,10 +75,10 @@ async def delete_chat(chat_id: int) -> None:
 
 async def get_chats() -> list:
     async def operation(session):
-        result = await session.scalars(select(Chat.tg_id))
+        result = await session.scalars(select(Chat.tg_id).where(Chat.tg_id < 0))
         return result.all()
 
-    return await execute_db_operation(operation) or []
+    return await execute_db_operation(operation, write=False) or []
 
 
 async def manage_user_time_and_xp(tg_id: int, action: str, value: int = None) -> float:
@@ -115,14 +115,20 @@ async def update_xp(tg_id: int, value: int) -> None:
 
 # Ивенты
 async def set_event(setting: str, value) -> None:
+    await set_event_settings({setting: value})
+
+
+async def set_event_settings(values):
     async def operation(session):
         event = await session.scalar(select(Event))
         if not event:
-            event = Event(name='Ивент', description='', cd_event=0, prim_event=0, lvl_event=0, activated=False)
+            event = Event(name='Ивент')
             session.add(event)
-        setattr(event, setting, value)
+        for setting, value in values.items():
+            if setting not in ('name', 'description', 'cd_event', 'prim_event', 'lvl_event', 'activated'):
+                raise ValueError('Неизвестная настройка события')
+            setattr(event, setting, value)
         await session.commit()
-
     await execute_db_operation(operation)
 
 
@@ -137,7 +143,7 @@ async def get_event_settings(for_admin: bool) -> dict:
             }
         return {'name': 'Ивент', 'description': '', 'cd': 0, 'prim': 0, 'lvl': 0, 'activated': False}
 
-    return await execute_db_operation(operation)
+    return await execute_db_operation(operation, write=False)
 
 
 # Каналы
@@ -155,7 +161,7 @@ async def manage_channels(action: str, tg_id: int = None, name: str = None, link
         await session.commit()
         return []
 
-    return await execute_db_operation(operation)
+    return await execute_db_operation(operation, write=False)
 
 
 async def get_channels() -> list:
@@ -240,7 +246,7 @@ async def get_user_info(tg_id: int) -> dict:
             'prim': user.prim_lvl, 'object_status': user.object_status, 'cd_items': user.cd_items
         }
 
-    return await execute_db_operation(operation)
+    return await execute_db_operation(operation, write=False)
 
 
 # Уровни
@@ -249,12 +255,12 @@ async def manage_levels(tg_id: int, action: str) -> bool | dict | None:
         await session.execute(text('BEGIN IMMEDIATE'))
         user = await session.scalar(select(User).where(User.tg_id == tg_id))
         if not user or user.level >= 10:
-            return False if action == 'able' else {'object_status': False, 'object_req': '', 'xp_status': False,
+            return False if action in ('able', 'update') else {'object_status': False, 'object_req': '', 'xp_status': False,
                                                    'xp_req': 0}
 
         level_req = await session.scalar(select(Level).where(Level.level == user.level + 1))
         if not level_req:
-            return False if action == 'able' else {'object_status': False, 'object_req': '', 'xp_status': False,
+            return False if action in ('able', 'update') else {'object_status': False, 'object_req': '', 'xp_status': False,
                                                    'xp_req': 0}
         if action == 'able':
             return user.object_status and user.xp >= level_req.xp
@@ -292,11 +298,6 @@ async def top() -> list:
     async def operation(session):
         top_users = await session.scalars(select(User).order_by(User.xp.desc(), User.tg_id).limit(10))
 
-        return []
-
-        # Сортируем по XP (по убыванию) и берем топ-10
-        top_users = sorted(users_list, key=lambda user: user.xp, reverse=True)[:10]
-
         return [
             {
                 'name': user.name,
@@ -306,7 +307,7 @@ async def top() -> list:
             for user in top_users
         ]
 
-    return await execute_db_operation(operation)
+    return await execute_db_operation(operation, write=False)
 
 
 # Предметы и промокоды
@@ -328,7 +329,8 @@ async def manage_items(action: str, tg_id: int = None, name: str = None, bot=Non
                                   prim=i['prim'],
                                   lvl=i['lvl'],
                                   ))
-            session.add_all(items)
+            for entry in items:
+                await session.merge(entry)
             await session.commit()
         elif action == 'get_all':
             items = await session.scalars(select(Item))
@@ -354,45 +356,46 @@ async def manage_items(action: str, tg_id: int = None, name: str = None, bot=Non
 
         elif action == 'bought':
             user = await session.scalar(select(User).where(User.tg_id == tg_id))
-            if not user or not item or item.key in user.items or item.name in user.items:
+            if not user or not item:
+                return None
+            configs = (await session.scalars(select(Item))).all()
+            refresh_items(user, configs, time.time())
+            if item.key in user.items:
                 return None
             user.items[item.key] = time.time()
-            user.cd_items += item.cd
-            user.prim_items += item.prim
-            user.lvl_items += item.lvl
+            refresh_items(user, configs, time.time())
 
         elif action == 'reset_users':
             users = await session.scalars(select(User))
             configs = (await session.scalars(select(Item))).all()
-            by_key = {key: item for item in configs for key in (item.key, item.name)}
             now = time.time()
             notices = []
             for user in users:
-                notices.extend((user.tg_id, key) for key, purchased in user.items.items() if purchased <= 0 or now - purchased >= (by_key[key].duration if key in by_key else 86400))
-                user.items = {key: purchased for key, purchased in user.items.items()
-                              if purchased > 0 and now - purchased < (by_key[key].duration if key in by_key else 86400)}
-                active = [by_key[key] for key in user.items if key in by_key]
-                user.cd_items = sum(item.cd for item in active)
-                user.prim_items = sum(item.prim for item in active)
-                user.lvl_items = sum(item.lvl for item in active)
+                expired = refresh_items(user, configs, now)
+                notices.extend((user.tg_id, name) for name in expired)
             await session.commit()
             if bot:
                 from aiogram.exceptions import TelegramAPIError
                 from html import escape
-                for user_id, key in notices:
+                for user_id, item_name in notices:
                     try:
-                        await bot.send_message(user_id, f'⏰ <b>Усиление закончилось</b>\n\n{escape(key)} · срок действия истёк.\nПродлить: /buy', parse_mode='HTML')
+                        await bot.send_message(user_id, f'⏰ <b>Усиление закончилось</b>\n\n{escape(item_name)} · срок действия истёк.\nПродлить: /buy', parse_mode='HTML')
                     except TelegramAPIError:
                         pass
 
         elif action == 'user_list':
             user = await session.scalar(select(User).where(User.tg_id == tg_id))
-            return list(user.items.keys()) if user else []
+            if not user:
+                return []
+            configs = (await session.scalars(select(Item))).all()
+            refresh_items(user, configs, time.time())
+            await session.commit()
+            return list(user.items.keys())
 
         await session.commit()
         return None
 
-    return await execute_db_operation(operation)
+    return await execute_db_operation(operation, write=False)
 
 
 async def get_items() -> list:
@@ -455,3 +458,47 @@ async def add_promo(name: str, limit: int, xp: int) -> None:
 
 async def use_promo(tg_id: int, promo: str) -> str:
     return await manage_promo('use', tg_id=tg_id, promo=promo) or '❌ Ошибка активации промокода'
+
+
+def refresh_items(user, configs, now):
+    """Поддерживает старые ключи по названию и пересчитывает эффекты."""
+    by_key = {key: item for item in configs for key in (item.key, item.name)}
+    active = {}
+    expired = []
+    for key, purchased in user.items.items():
+        item = by_key.get(key)
+        duration = item.duration if item else 86400
+        if purchased <= 0 or now - purchased >= duration:
+            expired.append(item.name if item else key)
+        elif item:
+            active[item.key] = max(active.get(item.key, 0), purchased)
+    user.items = active
+    user.cd_items = sum(by_key[key].cd for key in active)
+    user.prim_items = sum(by_key[key].prim for key in active)
+    user.lvl_items = sum(by_key[key].lvl for key in active)
+    return expired
+
+
+async def fulfill_payment(user_id, payment):
+    """Повторная доставка платежа не выдаёт усиление второй раз."""
+    async with async_session() as session:
+        await session.execute(text('BEGIN IMMEDIATE'))
+        if await session.get(Payment, payment.telegram_payment_charge_id):
+            return False
+        item = await session.scalar(select(Item).where(Item.key == payment.invoice_payload))
+        user = await session.get(User, user_id)
+        if not item or not user or payment.currency != 'XTR' or payment.total_amount != item.price:
+            raise ValueError('Параметры оплаченного счёта не совпадают с товаром')
+        configs = (await session.scalars(select(Item))).all()
+        now = time.time()
+        refresh_items(user, configs, now)
+        # Два оплаченных счёта на один товар продлевают срок, сохраняя одну копию эффекта.
+        if item.key in user.items:
+            user.items[item.key] += item.duration
+        else:
+            user.items[item.key] = now
+        refresh_items(user, configs, now)
+        session.add(Payment(charge_id=payment.telegram_payment_charge_id, user_id=user_id,
+                            item_key=item.key, amount=payment.total_amount))
+        await session.commit()
+        return True

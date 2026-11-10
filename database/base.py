@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import JSON, String, delete
+from sqlalchemy import JSON, String
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.mutable import MutableDict, MutableList
@@ -10,6 +10,7 @@ from bot.config import OBJECTS, STANDARD_ITEMS, LEVELS
 engine = create_async_engine(
     url=os.getenv('DATABASE_URL', 'sqlite+aiosqlite:///db.sqlite3'),
     echo=False,  # Отключаем логирование для производительности
+    connect_args={'timeout': 30},
     pool_pre_ping=True  # Проверка соединения перед использованием
 )
 
@@ -89,6 +90,14 @@ class Code(Base):
     activations: Mapped[int] = mapped_column(default=0)
     xp: Mapped[int] = mapped_column(default=0)
     users: Mapped[list] = mapped_column(MutableList.as_mutable(JSON), default=list)
+
+
+class Payment(Base):
+    __tablename__ = 'payments'
+    charge_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[int] = mapped_column()
+    item_key: Mapped[str] = mapped_column(String(255))
+    amount: Mapped[int] = mapped_column()
 
 
 class Object(Base):

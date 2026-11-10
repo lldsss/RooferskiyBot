@@ -1,15 +1,14 @@
+from bot.messages import cooldown as format_cooldown_message
 from bot.messages import profile
 import html
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, CallbackQuery, PreCheckoutQuery, LabeledPrice
-from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, CallbackQuery
 import bot.keyboards as kb
 import database.requests as rq
-from bot.config import ADMIN_ID, EVENT_CONFIG
 from bot.services import roof
-from bot.common import (Form, all_items, setup_user_and_chat, check_prerequisites,
-                        format_cooldown_message, process_roof_result, send_to_all_chats)
+from bot.common import setup_user_and_chat, check_prerequisites, process_roof_result
+
 
 router = Router()
 
@@ -27,14 +26,13 @@ async def command_roof(message: Message) -> None:
 
     user_id = message.from_user.id
 
-    await rq.manage_items('reset_users')
     remaining, obj = await roof(user_id)
     if remaining > 0:
         await message.reply(format_cooldown_message(remaining), parse_mode='HTML')
     elif obj is None:
         await message.reply('🏙 Пока нет доступных объектов. Попробуй позже.')
     else:
-        await process_roof_result(message, obj, user_id)
+        await process_roof_result(message, obj)
 
 
 @router.message(Command('me'))
@@ -86,7 +84,7 @@ async def command_level(message: Message) -> None:
         level_info = await rq.about_level_updating(message.from_user.id)
         states = ['❌', '✅']
         await message.reply(
-            f'<b>Твой уровень: {current_level}\n🚫 Ты пока не можешь его повысить</b>\n\n{states[level_info["object_status"]]} Руфанул {level_info["object_req"]}\n{states[level_info["xp_status"]]} Есть {level_info["xp_req"]} очков',
+            f'<b>Твой уровень: {current_level}\n🚫 Ты пока не можешь его повысить</b>\n\n{states[level_info["object_status"]]} Руфанул {html.escape(level_info["object_req"])}\n{states[level_info["xp_status"]]} Есть {level_info["xp_req"]} очков',
             parse_mode='HTML')
 
 
@@ -107,7 +105,8 @@ async def level_up(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == 'stats')
 async def cb_stats(callback: CallbackQuery) -> None:
     await rq.set_user(callback.from_user.id, callback.from_user.full_name)
-    await rq.set_chat(callback.message.chat.id, callback.message.chat.title or callback.from_user.full_name)
+    if callback.message.chat.type in ('group', 'supergroup'):
+        await rq.set_chat(callback.message.chat.id, callback.message.chat.title or callback.from_user.full_name)
     await callback.answer()
     user_info = await rq.get_user_info(callback.from_user.id)
     await callback.message.reply(

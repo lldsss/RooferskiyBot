@@ -1,34 +1,25 @@
 import html
 
-from aiogram import Router, F
-from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery, LabeledPrice, PreCheckoutQuery
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramMigrateToChat
-from aiogram.fsm.context import FSMContext
+import asyncio
+import logging
+from aiogram.types import Message
+from aiogram.exceptions import (TelegramForbiddenError, TelegramBadRequest,
+                                TelegramMigrateToChat, TelegramRetryAfter, TelegramAPIError)
 from aiogram.fsm.state import State, StatesGroup
-
 import bot.keyboards as kb
 import database.requests as rq
-
-from time import time
-
-from bot.config import ADMIN_ID, TEST_ID, COOLDOWN, EVENT_CONFIG, STANDARD_ITEMS
-from bot.services import roof
-
-
+from bot.config import ADMIN_ID
 
 
 class Form(StatesGroup):
     add_event_settings = State()
 
 
-all_items = ["buy_" + item["key"] for item in STANDARD_ITEMS]
-
-
 # Вспомогательные функции
 async def setup_user_and_chat(message: Message) -> None:
     await rq.set_user(message.from_user.id, message.from_user.full_name)
-    await rq.set_chat(message.chat.id, message.chat.title or message.from_user.full_name)
+    if message.chat.type in ('group', 'supergroup'):
+        await rq.set_chat(message.chat.id, message.chat.title or message.from_user.full_name)
 
 
 async def check_prerequisites(message: Message) -> bool:
@@ -46,17 +37,17 @@ async def check_prerequisites(message: Message) -> bool:
                 await message.reply('❗️ Для работы подпишись на канал разработчика и каналы спонсоров',
                                     reply_markup=await kb.channels())
                 return False
-        except TelegramBadRequest:
-            await message.bot.send_message(ADMIN_ID, f'Бот не является админом канала {channel["name"]}')
+        except (TelegramBadRequest, TelegramForbiddenError):
+            try:
+                await message.bot.send_message(ADMIN_ID, f'Не удалось проверить канал {channel["name"]}')
+            except TelegramAPIError:
+                logging.exception('Не удалось уведомить администратора')
             await message.reply('Не удалось проверить подписку. Попробуй позже.')
             return False
     return True
 
 
-from bot.messages import cooldown as format_cooldown_message
-
-
-async def process_roof_result(message: Message, obj: dict, user_id: int) -> None:
+async def process_roof_result(message: Message, obj: dict) -> None:
     title = '🎉 Успешный руф' if obj['status'] else '👮 Тебя приняли'
     caption = f"<b>{title}</b>\n\n🏙 {html.escape(obj['name'])}\n⭐ Очки: <b>{obj['xp']:+d}</b>"
     try:
@@ -68,9 +59,20 @@ async def process_roof_result(message: Message, obj: dict, user_id: int) -> None
 async def send_to_all_chats(bot, text: str, parse_mode: str = 'html') -> None:
     chats = await rq.get_chats()
     for chat_id in chats:
-        try:
-            await bot.send_message(chat_id, text, parse_mode=parse_mode)
-        except (TelegramForbiddenError, TelegramBadRequest, TelegramMigrateToChat):
-            await rq.delete_chat(chat_id)
-
-
+        for attempt in range(2):
+            try:
+                await bot.send_message(chat_id, text, parse_mode=parse_mode)
+                break
+            except TelegramRetryAfter as error:
+                if attempt == 0:
+                    await asyncio.sleep(error.retry_after)
+            except TelegramMigrateToChat as error:
+                await rq.set_chat(error.migrate_to_chat_id, '')
+                await rq.delete_chat(chat_id)
+                chat_id = error.migrate_to_chat_id
+            except TelegramForbiddenError:
+                await rq.delete_chat(chat_id)
+                break
+            except TelegramAPIError:
+                logging.exception('Не удалось отправить сообщение в чат %s', chat_id)
+                break

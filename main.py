@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import suppress
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 from bot.config import TOKEN
 from bot.handlers import router
 from database.requests import reset_users_items
@@ -19,7 +20,7 @@ async def main():
         await add_levels()
         await add_objects()
         task = asyncio.create_task(reset_users_items(bot))
-        dp = Dispatcher()
+        dp = Dispatcher(events_isolation=SimpleEventIsolation())
         dp.include_router(router)
         await dp.start_polling(bot)
     finally:
