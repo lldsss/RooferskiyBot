@@ -96,7 +96,11 @@ async def level_up(callback: CallbackQuery) -> None:
     if not await rq.update_level(callback.from_user.id):
         await callback.message.reply("🔒 Условия повышения ещё не выполнены. Проверь /level.")
         return
-    await callback.message.reply(f"<b>Твой уровень повышен!</b>\nТеперь твой уровень: {(await rq.get_user_info(callback.from_user.id))["level"]}", parse_mode="HTML")
+    user_info = await rq.get_user_info(callback.from_user.id)
+    await callback.message.reply(
+        f"<b>Твой уровень повышен!</b>\nТеперь твой уровень: {user_info['level']}",
+        parse_mode="HTML",
+    )
 
 
 

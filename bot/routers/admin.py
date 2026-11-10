@@ -52,10 +52,13 @@ async def event_toggle(callback: CallbackQuery) -> None:
     event_data = await rq.get_event_settings(True)
     if callback.data == 'event_start':
         await rq.set_event('activated', True)
-        text = f'<b>🎊 Ивент «{html.escape(event_data['name'])}»</b>\n{html.escape(event_data['description'])}'
+        text = (
+            f"<b>🎊 Ивент «{html.escape(event_data['name'])}»</b>\n"
+            f"{html.escape(event_data['description'])}"
+        )
     else:
         await rq.set_event('activated', False)
-        text = f'Ивент «{html.escape(event_data['name'])}» завершён'
+        text = f"Ивент «{html.escape(event_data['name'])}» завершён"
     await send_to_all_chats(callback.message.bot, text)
     await callback.message.answer('✅ Состояние события обновлено.', reply_markup=kb.event_settings)
 
