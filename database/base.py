@@ -1,14 +1,15 @@
-import os
+from pathlib import Path
 from sqlalchemy import JSON, String
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 
 from bot.config import OBJECTS, STANDARD_ITEMS, LEVELS
+from database.storage import database_url
 
 # Улучшенная конфигурация движка
 engine = create_async_engine(
-    url=os.getenv('DATABASE_URL', 'sqlite+aiosqlite:///db.sqlite3'),
+    url=database_url(Path(__file__).resolve().parent.parent),
     echo=False,  # Отключаем логирование для производительности
     connect_args={'timeout': 30},
     pool_pre_ping=True  # Проверка соединения перед использованием
@@ -119,6 +120,19 @@ async def seed(model, entries):
 
 
 async def add_objects():
+    # Rename existing rows before seeding so upgrades do not duplicate objects.
+    from sqlalchemy import update
+    async with async_session() as session:
+        for number in range(1, 5):
+            old_name, new_name = f'панельку-{number}', f'Панелька-{number}'
+            old = await session.get(Object, old_name)
+            if old:
+                if await session.get(Object, new_name):
+                    await session.delete(old)
+                else:
+                    old.name = new_name
+            await session.execute(update(Level).where(Level.object == old_name).values(object=new_name))
+        await session.commit()
     await seed(Object, OBJECTS)
 
 
@@ -160,3 +174,4 @@ async def base_run():
             ))
 
         await session.commit()
+

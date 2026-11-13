@@ -76,3 +76,12 @@ async def send_to_all_chats(bot, text: str, parse_mode: str = 'html') -> None:
             except TelegramAPIError:
                 logging.exception('Не удалось отправить сообщение в чат %s', chat_id)
                 break
+
+
+
+async def check_callback_prerequisites(callback) -> bool:
+    """Check the clicking user, not the bot that authored the keyboard message."""
+    if not isinstance(callback.message, Message):
+        return False
+    message = callback.message.model_copy(update={'from_user': callback.from_user})
+    return await check_prerequisites(message)

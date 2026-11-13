@@ -395,7 +395,7 @@ async def manage_items(action: str, tg_id: int = None, name: str = None, bot=Non
         await session.commit()
         return None
 
-    return await execute_db_operation(operation, write=False)
+    return await execute_db_operation(operation, write=action not in ('get_all', 'get_one'))
 
 
 async def get_items() -> list:
@@ -502,3 +502,4 @@ async def fulfill_payment(user_id, payment):
                             item_key=item.key, amount=payment.total_amount))
         await session.commit()
         return True
+

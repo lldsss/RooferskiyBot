@@ -24,13 +24,13 @@ OBJECTS = [
      'image': 'https://core-pht-proxy.maps.yandex.ru/v1/photos/download?photo_id=zoApKndKJ8hU9ByHzxRwRA&image_size=X5L'},
     {'name': 'ЖК Лосиный Остров', 'floors': 30, 'prim': 0.2, 'last_level': 3,
      'image': 'https://avatars.mds.yandex.net/get-altay/13754922/2a00000191bd7497f7ca9d0392c369c988b3/XXXL'},
-    {'name': 'панельку-1', 'floors': 12, 'prim': 0.1, 'last_level': 2,
+    {'name': 'Панелька-1', 'floors': 12, 'prim': 0.1, 'last_level': 2,
      'image': 'https://avatars.dzeninfra.ru/get-zen_doc/271828/pub_651f59f73a21c739e60819d2_65208b76c385843dfe9382b0/scale_1200'},
-    {'name': 'панельку-2', 'floors': 16, 'prim': 0.1, 'last_level': 2,
+    {'name': 'Панелька-2', 'floors': 16, 'prim': 0.1, 'last_level': 2,
      'image': 'https://avatars.dzeninfra.ru/get-zen_doc/3362051/pub_5f93d32da81c50318e5ee032_5f94057ba81c50318ea16bd3/scale_1200'},
-    {'name': 'панельку-3', 'floors': 18, 'prim': 0.1, 'last_level': 2,
+    {'name': 'Панелька-3', 'floors': 18, 'prim': 0.1, 'last_level': 2,
      'image': 'https://avatars.dzeninfra.ru/get-zen_doc/271828/pub_66cf0086657cb751810ebb2d_66cf3a027c699b4584b15053/scale_1200'},
-    {'name': 'панельку-4', 'floors': 22, 'prim': 0.1, 'last_level': 2,
+    {'name': 'Панелька-4', 'floors': 22, 'prim': 0.1, 'last_level': 2,
      'image': 'https://upload.wikimedia.org/wikipedia/commons/e/ea/%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%2C_%D0%9E%D1%80%D0%B5%D1%85%D0%BE%D0%B2%D1%8B%D0%B9_%D0%B1%D1%83%D0%BB%D1%8C%D0%B2%D0%B0%D1%80_18%2C_%D0%9A%D0%9E%D0%9F%D0%AD_%D0%BD%D0%BE%D1%87%D1%8C%D1%8E_%2816165437657%29.jpg'},
     {'name': 'ЖК Богородский', 'floors': 30, 'prim': 0.2, 'last_level': 3,
      'image': 'https://smolotka.urbanus.ru/uploads/photo/original/zhk/17/17-img-0.jpg'},
@@ -148,3 +148,4 @@ LEVELS = [
     {'level': 9, 'xp': 900, 'object': 'Москва-Сити, Федерация (Восток)'},
     {'level': 10, 'xp': 1000, 'object': 'Бурдж-Халифу'}
 ]
+
