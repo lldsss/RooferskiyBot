@@ -120,6 +120,19 @@ async def seed(model, entries):
 
 
 async def add_objects():
+    # Rename existing rows before seeding so upgrades do not duplicate objects.
+    from sqlalchemy import update
+    async with async_session() as session:
+        for number in range(1, 5):
+            old_name, new_name = f'панельку-{number}', f'Панелька-{number}'
+            old = await session.get(Object, old_name)
+            if old:
+                if await session.get(Object, new_name):
+                    await session.delete(old)
+                else:
+                    old.name = new_name
+            await session.execute(update(Level).where(Level.object == old_name).values(object=new_name))
+        await session.commit()
     await seed(Object, OBJECTS)
 
 
