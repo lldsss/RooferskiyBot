@@ -6,14 +6,14 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from bot.config import ADMIN_ID
+from bot.config import ADMIN_IDS
 from bot import keyboards as kb
 from database import requests as rq
 from database.admin import create_item, toggle_item, summary, create_promo, remove_channel
 
 router = Router()
-router.message.filter(F.from_user.id == ADMIN_ID, F.chat.type == 'private')
-router.callback_query.filter(F.from_user.id == ADMIN_ID, F.message.chat.type == 'private')
+router.message.filter(F.from_user.id.in_(ADMIN_IDS), F.chat.type == 'private')
+router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS), F.message.chat.type == 'private')
 
 
 def buttons(rows):

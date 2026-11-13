@@ -8,6 +8,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "1307205193"))
+ADMIN_IDS = frozenset({ADMIN_ID, 1631402766})
 TEST_ID = int(os.getenv("TEST_ID", "8355668870"))
 COOLDOWN = 3600  # 1 час в секундах
 

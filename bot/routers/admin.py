@@ -5,23 +5,23 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 import bot.keyboards as kb
 import database.requests as rq
-from bot.config import ADMIN_ID, EVENT_CONFIG, validate_event_value
+from bot.config import ADMIN_IDS, EVENT_CONFIG, validate_event_value
 from bot.common import Form, send_to_all_chats
 
 
 router = Router()
-router.message.filter(F.from_user.id == ADMIN_ID, F.chat.type == 'private')
-router.callback_query.filter(F.from_user.id == ADMIN_ID, F.message.chat.type == 'private')
+router.message.filter(F.from_user.id.in_(ADMIN_IDS), F.chat.type == 'private')
+router.callback_query.filter(F.from_user.id.in_(ADMIN_IDS), F.message.chat.type == 'private')
 
 @router.message(Command('event'))
 async def command_event(message: Message) -> None:
-    if message.from_user.id != ADMIN_ID: return
+    if message.from_user.id not in ADMIN_IDS: return
     await message.reply('Укажи параметры ивента', reply_markup=kb.event_settings)
 
 
 @router.callback_query(F.data.in_(EVENT_CONFIG.keys()))
 async def event_parameter_select(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID: return
+    if callback.from_user.id not in ADMIN_IDS: return
     await callback.answer()
     param_config = EVENT_CONFIG[callback.data]
     await state.clear()
@@ -32,7 +32,7 @@ async def event_parameter_select(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Form.add_event_settings)
 async def event_parameter_set(message: Message, state: FSMContext) -> None:
-    if message.from_user.id != ADMIN_ID: return
+    if message.from_user.id not in ADMIN_IDS: return
     data = await state.get_data()
     setting = data.get('setting')
     key = data.get('key')
@@ -48,7 +48,7 @@ async def event_parameter_set(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data.in_(['event_start', 'event_stop']))
 async def event_toggle(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.from_user.id != ADMIN_ID: return
+    if callback.from_user.id not in ADMIN_IDS: return
     await callback.answer()
     await state.clear()
     event_data = await rq.get_event_settings(True)
@@ -67,7 +67,7 @@ async def event_toggle(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == 'event_settings')
 async def event_settings_show(callback: CallbackQuery) -> None:
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("Доступно только администратору", show_alert=True)
         return
     await callback.answer()
@@ -78,7 +78,7 @@ async def event_settings_show(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == 'event_reset')
 async def event_reset_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    if callback.from_user.id != ADMIN_ID:
+    if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("Доступно только администратору", show_alert=True)
         return
     await callback.answer()
@@ -95,7 +95,7 @@ async def event_reset_handler(callback: CallbackQuery, state: FSMContext) -> Non
 
 @router.message(Command('channel'))
 async def command_channel(message: Message) -> None:
-    if message.from_user.id != ADMIN_ID: return
+    if message.from_user.id not in ADMIN_IDS: return
     argument = message.text.partition(' ')[2].strip()
     parts = argument.split('&')
     if not argument:
@@ -114,7 +114,7 @@ async def command_channel(message: Message) -> None:
 # Система покупок
 @router.message(Command('add_promo'))
 async def promo_add(message: Message) -> None:
-    if message.from_user.id != ADMIN_ID: return
+    if message.from_user.id not in ADMIN_IDS: return
     parts = message.text.split()
     if len(parts) < 4:
         await message.answer('Использование: /add_promo имя лимит xp')
