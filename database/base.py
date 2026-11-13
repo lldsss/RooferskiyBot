@@ -1,14 +1,15 @@
-import os
+from pathlib import Path
 from sqlalchemy import JSON, String
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 
 from bot.config import OBJECTS, STANDARD_ITEMS, LEVELS
+from database.storage import database_url
 
 # Улучшенная конфигурация движка
 engine = create_async_engine(
-    url=os.getenv('DATABASE_URL', 'sqlite+aiosqlite:///db.sqlite3'),
+    url=database_url(Path(__file__).resolve().parent.parent),
     echo=False,  # Отключаем логирование для производительности
     connect_args={'timeout': 30},
     pool_pre_ping=True  # Проверка соединения перед использованием
@@ -160,3 +161,4 @@ async def base_run():
             ))
 
         await session.commit()
+
