@@ -2,21 +2,28 @@ from bot.messages import cooldown as format_cooldown_message
 from bot.messages import profile
 import html
 from aiogram import Router, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, CommandObject
+from aiogram.exceptions import TelegramAPIError
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from contextlib import suppress
 from aiogram.types import Message, CallbackQuery
 import bot.keyboards as kb
 import database.requests as rq
 from bot.services import roof
-from bot.common import setup_user_and_chat, check_prerequisites, process_roof_result, check_callback_prerequisites
+from bot.common import setup_user_and_chat, ensure_user, check_prerequisites, process_roof_result, check_callback_prerequisites
+from bot.limits import promo_limiter
 
 
 router = Router()
 
 @router.message(CommandStart())
-async def command_start(message: Message) -> None:
+async def command_start(message: Message, command: CommandObject) -> None:
     await setup_user_and_chat(message)
+    if message.chat.type == 'private' and command.args == 'promo':
+        await message.answer('🎟 Отправь сюда: /promo КОД')
+        return
     if not await check_prerequisites(message): return
-    await message.reply('🏙 Руферский бот\n\n/roof — отправиться на объект\n/me — моя статистика\n/top — рейтинг игроков\n/level — условия повышения\n/buy — магазин усилений на 24 часа\n/promo КОД — активировать промокод')
+    await message.reply('🏙 Руферский бот\n\n/roof — отправиться на объект\n/me — моя статистика\n/top — рейтинг игроков\n/level — условия повышения\n/buy — магазин усилений на 24 часа\n/promo КОД — активировать промокод (в личке с ботом)\n/paysupport — помощь с оплатой')
 
 
 @router.message(Command('roof'))
@@ -71,6 +78,7 @@ async def command_top(message: Message) -> None:
 @router.message(Command('level'))
 async def command_level(message: Message) -> None:
     await setup_user_and_chat(message)
+    if not await check_prerequisites(message): return
     user_info = await rq.get_user_info(message.from_user.id)
     current_level = user_info['level']
     if current_level >= 10:
@@ -109,9 +117,7 @@ async def cb_stats(callback: CallbackQuery) -> None:
     await callback.answer()
     if not await check_callback_prerequisites(callback):
         return
-    await rq.set_user(callback.from_user.id, callback.from_user.full_name)
-    if callback.message.chat.type in ('group', 'supergroup'):
-        await rq.set_chat(callback.message.chat.id, callback.message.chat.title or callback.from_user.full_name)
+    await ensure_user(callback.from_user)
     user_info = await rq.get_user_info(callback.from_user.id)
     await callback.message.reply(
         profile(callback.from_user.first_name, user_info),
@@ -120,12 +126,24 @@ async def cb_stats(callback: CallbackQuery) -> None:
 
 # Промокоды
 @router.message(Command('promo'))
-async def promo_use(message: Message) -> None:
+async def promo_use(message: Message, command: CommandObject) -> None:
     await setup_user_and_chat(message)
-    if not await check_prerequisites(message): return
-    promo_code = message.text.split()[1].upper() if len(message.text.split()) > 1 else 'empty'
+    if message.chat.type != 'private':
+        # Код в общем чате видят все, и его активирует тот, кто успеет первым.
+        with suppress(TelegramAPIError):
+            await message.delete()
+        username = (await message.bot.me()).username
+        await message.answer(
+            f'🔒 {html.escape(message.from_user.first_name)}, промокоды активируются только в личке с ботом, '
+            'чтобы код не забрали другие.',
+            parse_mode='HTML', reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text='🎟 Ввести промокод', url=f'https://t.me/{username}?start=promo')]]))
+        return
+    if not await check_prerequisites(message, allow_private=True): return
+    wait = promo_limiter.hit(message.from_user.id)
+    if wait:
+        await message.reply(f'⏳ Слишком много попыток. Попробуй через {int(wait // 60) + 1} мин.')
+        return
+    promo_code = command.args.split()[0].upper() if command.args else 'empty'
     result = await rq.use_promo(message.from_user.id, promo_code)
     await message.reply(result, parse_mode='HTML')
-
-
-

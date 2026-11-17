@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from sqlalchemy import JSON, String
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
@@ -99,6 +100,8 @@ class Payment(Base):
     user_id: Mapped[int] = mapped_column()
     item_key: Mapped[str] = mapped_column(String(255))
     amount: Mapped[int] = mapped_column()
+    refunded: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[float] = mapped_column(default=time.time)
 
 
 class Object(Base):
@@ -151,12 +154,18 @@ async def base_run():
         await conn.run_sync(Base.metadata.create_all)
         # Совместимое обновление старой SQLite-базы без удаления предметов.
         from sqlalchemy import text
-        columns = {row[1] for row in (await conn.execute(text('PRAGMA table_info(items)')))}
-        for name, definition in {'available_until': 'FLOAT NOT NULL DEFAULT 0',
-                                 'duration': 'INTEGER NOT NULL DEFAULT 86400',
-                                 'enabled': 'BOOLEAN NOT NULL DEFAULT 1'}.items():
-            if name not in columns:
-                await conn.execute(text(f'ALTER TABLE items ADD COLUMN {name} {definition}'))
+        migrations = {
+            'items': {'available_until': 'FLOAT NOT NULL DEFAULT 0',
+                      'duration': 'INTEGER NOT NULL DEFAULT 86400',
+                      'enabled': 'BOOLEAN NOT NULL DEFAULT 1'},
+            'payments': {'refunded': 'BOOLEAN NOT NULL DEFAULT 0',
+                         'created_at': 'FLOAT NOT NULL DEFAULT 0'},
+        }
+        for table, added in migrations.items():
+            columns = {row[1] for row in (await conn.execute(text(f'PRAGMA table_info({table})')))}
+            for name, definition in added.items():
+                if name not in columns:
+                    await conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {definition}'))
 
     # Добавляем начальные данные если их нет
     async with async_session() as session:

@@ -7,6 +7,22 @@ from bot.services import roof
 from bot.messages import profile, cooldown
 
 
+async def grant(tg_id, key):
+    """Выдаёт предмет так же, как оплата Stars."""
+    from types import SimpleNamespace
+    import uuid
+    item = await rq.get_item(key)
+    await rq.fulfill_payment(tg_id, SimpleNamespace(
+        telegram_payment_charge_id=uuid.uuid4().hex, invoice_payload=key,
+        currency='XTR', total_amount=item['price']))
+
+
+async def set_xp(tg_id, xp):
+    async with async_session() as session:
+        (await session.get(User, tg_id)).xp = xp
+        await session.commit()
+
+
 class GameTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         async with engine.begin() as conn:
@@ -18,14 +34,14 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
         await rq.set_user(123, 'Tester')
 
     async def test_purchase_and_expiry(self):
-        await rq.bought_item(123, 'boltorez')
-        await rq.bought_item(123, 'boltorez')
+        await grant(123, 'boltorez')
+        await grant(123, 'boltorez')
         self.assertEqual((await rq.get_user_info(123))['cd_items'], -600)
         async with async_session() as session:
             user = await session.get(User, 123)
             user.items = {'boltorez': 1}
             await session.commit()
-        await rq.manage_items('reset_users')
+        await rq.expire_items()
         self.assertEqual((await rq.get_user_info(123))['cd_items'], 0)
 
     async def test_roof_cooldown_and_inactive_event(self):
@@ -63,7 +79,7 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await create_item(data))
         item = next(i for i in await rq.get_items() if i.name == 'Тестовый')
         self.assertTrue((await rq.get_item(item.key))['available'])
-        await rq.bought_item(123, item.key)
+        await grant(123, item.key)
         async with async_session() as session:
             row = await session.get(Item, item.name)
             row.available_until = time.time() - 1
@@ -72,13 +88,13 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.assertFalse((await rq.get_item(item.key))['available'])
         self.assertNotIn('buy_' + item.key, [b.callback_data for row in (await shop()).inline_keyboard for b in row])
-        await rq.manage_items('reset_users')
+        await rq.expire_items()
         self.assertIn(item.key, await rq.user_items(123))
         async with async_session() as session:
             user = await session.get(User, 123)
             user.items = {item.key: time.time() - 3601}
             await session.commit()
-        await rq.manage_items('reset_users')
+        await rq.expire_items()
         self.assertNotIn(item.key, await rq.user_items(123))
         self.assertEqual((await rq.get_user_info(123))['cd_items'], 0)
 
@@ -143,8 +159,8 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ranking_and_maximum_level(self):
         await rq.set_user(456, 'Second')
-        await rq.update_xp(123, 20)
-        await rq.update_xp(456, 50)
+        await set_xp(123, 20)
+        await set_xp(456, 50)
         self.assertEqual([row['xp'] for row in await rq.top()], [50, 20])
         async with async_session() as session:
             user = await session.get(User, 123)
@@ -193,7 +209,7 @@ class GameTests(unittest.IsolatedAsyncioTestCase):
     async def test_boost_keeps_required_object_reachable(self):
         from unittest.mock import patch
         from database.base import Object
-        await rq.bought_item(123, 'listik')
+        await grant(123, 'listik')
         async with async_session() as session:
             obj = await session.get(Object, 'ЖК Богородский')
             obj.prim = 0

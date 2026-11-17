@@ -8,6 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from bot.config import ADMIN_IDS
 from bot import keyboards as kb
+from bot.common import invalidate_channels
 from database import requests as rq
 from database.admin import create_item, toggle_item, summary, create_promo, remove_channel
 
@@ -38,7 +39,7 @@ MANAGEMENT_FIELDS = {
     'channel': [('tg_id', 'Отправь числовой ID канала (начинается с -100):'),
                 ('name', 'Название канала (до 255 символов):'),
                 ('link', 'Ссылка на канал: https://t.me/имя или ссылка-приглашение.')],
-    'promo': [('name', 'Промокод: 1–32 латинские буквы, цифры, _ или -.'),
+    'promo': [('name', 'Промокод: 6–32 латинские буквы, цифры, _ или -.'),
               ('limit', 'Лимит активаций: от 1 до 1000000.'),
               ('xp', 'Награда в очках: от 0 до 1000000.')],
 }
@@ -52,7 +53,7 @@ def parse_management(kind, field, value):
         return int(value)
     if field == 'name':
         if kind == 'promo':
-            if not re.fullmatch(r'[A-Za-z0-9_-]{1,32}', value): raise ValueError
+            if not re.fullmatch(r'[A-Za-z0-9_-]{6,32}', value): raise ValueError
             return value.upper()
         if not 1 <= len(value) <= 255: raise ValueError
         return value
@@ -112,6 +113,7 @@ async def panel_action(callback: CallbackQuery, state: FSMContext):
         data = await state.get_data()
         if data['kind'] == 'channel':
             await rq.add_channel(**data['values'])
+            invalidate_channels()
             result = '✅ Канал сохранён.'
         else:
             result = '✅ Промокод создан.' if await create_promo(data['values']) else 'Промокод с таким именем уже существует.'
@@ -138,10 +140,12 @@ async def panel_action(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer('Восстановить стандартный канал? Текущий список обязательных подписок будет заменён.', reply_markup=buttons([[('✅ Восстановить', 'admin_channels_reset_confirm')], [('Назад', 'admin_channels')]]))
     elif action == 'admin_channels_reset_confirm':
         await rq.reset_channels()
+        invalidate_channels()
         await callback.message.answer('✅ Стандартный канал восстановлен.', reply_markup=menu)
     elif action.startswith('admin_channel_delete_'):
         channel_id = int(action.removeprefix('admin_channel_delete_'))
         await remove_channel(channel_id)
+        invalidate_channels()
         await callback.message.answer('✅ Канал удалён из обязательных подписок.', reply_markup=menu)
     elif action == 'admin_cancel':
         await callback.message.answer('⚙️ Панель администратора', reply_markup=menu)

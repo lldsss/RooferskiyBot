@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import SimpleEventIsolation
 from bot.config import TOKEN
 from bot.handlers import router
+from bot.middlewares import ThrottlingMiddleware
 from database.requests import reset_users_items
 from database.base import base_run, add_items, add_objects, add_levels, engine
 
@@ -21,6 +22,9 @@ async def main():
         await add_objects()
         task = asyncio.create_task(reset_users_items(bot))
         dp = Dispatcher(events_isolation=SimpleEventIsolation())
+        throttling = ThrottlingMiddleware()
+        dp.message.middleware(throttling)
+        dp.callback_query.middleware(throttling)
         dp.include_router(router)
         await dp.start_polling(bot)
     finally:

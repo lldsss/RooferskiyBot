@@ -1,4 +1,5 @@
 import html
+import time
 
 import asyncio
 import logging
@@ -8,42 +9,100 @@ from aiogram.exceptions import (TelegramForbiddenError, TelegramBadRequest,
 from aiogram.fsm.state import State, StatesGroup
 import bot.keyboards as kb
 import database.requests as rq
-from bot.config import ADMIN_ID
+from bot.config import ADMIN_IDS
+from bot.limits import TTLCache
+
+SUBSCRIPTION_TTL = 600     # успешная проверка подписки живёт 10 минут
+CHANNELS_TTL = 60          # список обязательных каналов перечитывается раз в минуту
+ADMIN_ALERT_INTERVAL = 3600
+
+_known_users = TTLCache(ttl=6 * 3600)
+_known_chats = TTLCache(ttl=6 * 3600)
+_subscriptions = TTLCache(ttl=SUBSCRIPTION_TTL)
+_channels = TTLCache(ttl=CHANNELS_TTL)
+_admin_alerts: dict = {}
 
 
 class Form(StatesGroup):
     add_event_settings = State()
 
 
+def invalidate_channels() -> None:
+    """Вызывать после любого изменения списка обязательных каналов."""
+    _channels.clear()
+    _subscriptions.clear()
+
+
+async def get_channels_cached() -> list:
+    channels = _channels.get('all')
+    if channels is None:
+        channels = await rq.get_channels()
+        _channels.set('all', channels)
+    return channels
+
+
+async def notify_admins(bot, text: str, parse_mode: str | None = None) -> None:
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode=parse_mode)
+        except TelegramAPIError:
+            logging.exception('Не удалось уведомить администратора %s', admin_id)
+
+
+async def _alert_channel_failure(bot, channel: dict) -> None:
+    """Не чаще раза в час на канал, чтобы не засыпать админов сообщениями."""
+    now = time.monotonic()
+    last = _admin_alerts.get(channel['tg_id'])
+    if last is not None and now - last < ADMIN_ALERT_INTERVAL:
+        return
+    _admin_alerts[channel['tg_id']] = now
+    await notify_admins(bot, f'⚠️ Не удалось проверить подписку на канал «{channel["name"]}» '
+                             f'(ID {channel["tg_id"]}). Проверь, что бот — админ канала. '
+                             'Пока проверка не работает, этот канал пропускается.')
+
+
 # Вспомогательные функции
+async def ensure_user(user) -> None:
+    """Пишет игрока в базу только при первом появлении или смене имени."""
+    if _known_users.get(user.id) != user.full_name:
+        await rq.set_user(user.id, user.full_name)
+        _known_users.set(user.id, user.full_name)
+
+
 async def setup_user_and_chat(message: Message) -> None:
-    await rq.set_user(message.from_user.id, message.from_user.full_name)
+    await ensure_user(message.from_user)
     if message.chat.type in ('group', 'supergroup'):
-        await rq.set_chat(message.chat.id, message.chat.title or message.from_user.full_name)
+        title = message.chat.title or message.from_user.full_name
+        if _known_chats.get(message.chat.id) != title:
+            await rq.set_chat(message.chat.id, title)
+            _known_chats.set(message.chat.id, title)
 
 
-async def check_prerequisites(message: Message) -> bool:
-    if message.chat.type == 'private':
+async def check_prerequisites(message: Message, allow_private: bool = False) -> bool:
+    if message.from_user is None:
+        return False
+    if message.chat.type == 'private' and not allow_private:
         await message.answer(
             '👋 Привет! Я работаю <b>только в группах, и только если ты подписан на каналы разработчика и спонсоров</b>',
             parse_mode='HTML', reply_markup=kb.start_button)
         return False
 
-    channels = await rq.get_channels()
-    for channel in channels:
+    user_id = message.from_user.id
+    for channel in await get_channels_cached():
+        cache_key = (channel['tg_id'], user_id)
+        if _subscriptions.get(cache_key):
+            continue
         try:
-            user_status = await message.bot.get_chat_member(chat_id=channel['tg_id'], user_id=message.from_user.id)
-            if user_status.status in ('left', 'kicked') or (user_status.status == 'restricted' and not user_status.is_member):
-                await message.reply('❗️ Для работы подпишись на канал разработчика и каналы спонсоров',
-                                    reply_markup=await kb.channels())
-                return False
+            member = await message.bot.get_chat_member(chat_id=channel['tg_id'], user_id=user_id)
         except (TelegramBadRequest, TelegramForbiddenError):
-            try:
-                await message.bot.send_message(ADMIN_ID, f'Не удалось проверить канал {channel["name"]}')
-            except TelegramAPIError:
-                logging.exception('Не удалось уведомить администратора')
-            await message.reply('Не удалось проверить подписку. Попробуй позже.')
+            # Бот потерял доступ к каналу: игра не должна вставать во всех группах.
+            await _alert_channel_failure(message.bot, channel)
+            continue
+        if member.status in ('left', 'kicked') or (member.status == 'restricted' and not member.is_member):
+            await message.reply('❗️ Для работы подпишись на канал разработчика и каналы спонсоров',
+                                reply_markup=await kb.channels())
             return False
+        _subscriptions.set(cache_key, True)
     return True
 
 
@@ -78,10 +137,9 @@ async def send_to_all_chats(bot, text: str, parse_mode: str = 'html') -> None:
                 break
 
 
-
-async def check_callback_prerequisites(callback) -> bool:
+async def check_callback_prerequisites(callback, allow_private: bool = False) -> bool:
     """Check the clicking user, not the bot that authored the keyboard message."""
     if not isinstance(callback.message, Message):
         return False
     message = callback.message.model_copy(update={'from_user': callback.from_user})
-    return await check_prerequisites(message)
+    return await check_prerequisites(message, allow_private=allow_private)

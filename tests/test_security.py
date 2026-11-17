@@ -39,7 +39,7 @@ class SecurityTests(unittest.IsolatedAsyncioTestCase):
                                     currency='XTR', total_amount=10) for key in ('one', 'two')]
         await asyncio.gather(*(rq.fulfill_payment(123, p) for p in payments),
                              *(rq.user_items(123) for _ in range(10)),
-                             rq.manage_items('reset_users'))
+                             rq.expire_items())
         async with self.sessions() as session:
             user = await session.get(User, 123)
             self.assertEqual(set(user.items), {'one', 'two'})

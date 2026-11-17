@@ -1,4 +1,6 @@
 import html
+from contextlib import suppress
+from aiogram.exceptions import TelegramAPIError
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -6,7 +8,8 @@ from aiogram.fsm.context import FSMContext
 import bot.keyboards as kb
 import database.requests as rq
 from bot.config import ADMIN_IDS, EVENT_CONFIG, validate_event_value
-from bot.common import Form, send_to_all_chats
+from bot.common import Form, send_to_all_chats, invalidate_channels
+from bot.routers.panel import parse_management
 
 
 router = Router()
@@ -100,6 +103,8 @@ async def command_channel(message: Message) -> None:
     parts = argument.split('&')
     if not argument:
         await rq.reset_channels()
+        invalidate_channels()
+        await message.answer('✅ Восстановлен стандартный список каналов.')
     else:
         try:
             tg_id, name, link = int(parts[0]), parts[1].strip(), parts[2].strip()
@@ -108,6 +113,7 @@ async def command_channel(message: Message) -> None:
             await message.answer('Формат: /channel ID & Название & https://t.me/канал')
             return
         await rq.add_channel(tg_id=tg_id, name=name, link=link)
+        invalidate_channels()
         await message.answer(f'✅ Канал {name} добавлен!')
 
 
@@ -120,10 +126,43 @@ async def promo_add(message: Message) -> None:
         await message.answer('Использование: /add_promo имя лимит xp')
         return
     try:
-        name, limit, xp = parts[1].upper(), int(parts[2]), int(parts[3])
-        if limit < 1 or xp < 0: raise ValueError
+        name = parse_management('promo', 'name', parts[1])
+        limit = parse_management('promo', 'limit', parts[2])
+        xp = parse_management('promo', 'xp', parts[3])
     except ValueError:
-        await message.answer('Лимит должен быть положительным целым числом, очки — неотрицательным.')
+        await message.answer('Код: 6–32 символа (A-Z, 0-9, _ или -), лимит: 1–1000000, очки: 0–1000000.')
         return
-    await rq.add_promo(name, limit, xp)
-    await message.answer(f'Ты добавил код {name}')
+    if await rq.add_promo(name, limit, xp):
+        await message.answer(f'✅ Код {name} создан.')
+    else:
+        await message.answer(f'Код {name} уже существует.')
+
+
+@router.message(Command('refund'))
+async def refund(message: Message) -> None:
+    """/refund CHARGE_ID [USER_ID] — вернуть Stars и снять оплаченный срок усиления."""
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer('Использование: /refund CHARGE_ID [USER_ID]\n'
+                             'USER_ID нужен только для платежа, которого нет в базе.')
+        return
+    charge_id = parts[1]
+    payment = await rq.get_payment(charge_id)
+    if payment and payment['refunded']:
+        await message.answer('Этот платёж уже возвращён.')
+        return
+    try:
+        user_id = payment['user_id'] if payment else int(parts[2])
+    except (IndexError, ValueError):
+        await message.answer('Платёж не найден в базе. Укажи USER_ID вторым аргументом.')
+        return
+    try:
+        await message.bot.refund_star_payment(user_id=user_id, telegram_payment_charge_id=charge_id)
+    except TelegramAPIError as error:
+        await message.answer(f'❌ Telegram отклонил возврат: {html.escape(str(error))}')
+        return
+    if payment:
+        await rq.revoke_payment(charge_id)
+    await message.answer(f'✅ Возвращено. Пользователь {user_id}' + (', усиление отозвано.' if payment else '.'))
+    with suppress(TelegramAPIError):
+        await message.bot.send_message(user_id, '↩️ Оплата возвращена, Stars зачислены обратно на счёт.')
