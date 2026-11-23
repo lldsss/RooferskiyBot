@@ -161,7 +161,17 @@ OBJECTS = [
     {'name': 'Москва-Сити, One Tower', 'floors': 90, 'prim': 0.8, 'last_level': 1000,
      'image': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/Scyscraper_moscow_city_one_tower_2025.jpg/1280px-Scyscraper_moscow_city_one_tower_2025.jpg'},
     {'name': 'ЖК Level Звенигородская', 'floors': 64, 'prim': 0.4, 'last_level': 1000,
-     'image': ''}
+     'image': ''},
+    {'name': 'Радиомачта ШАРРТ-257', 'floors': 86, 'prim': 0.4, 'last_level': 1000,
+     'image': 'https://photos.wikimapia.org/p/00/06/96/93/77_big.jpg'},
+    {'name': 'ЖК Прагма Сити', 'floors': 23, 'prim': 0.5, 'last_level': 1000,
+     'image': 'https://pragma-stroy.ru/images/images1240/4837.jpg'},
+    # Фото: Olga Grunina, Wikimedia Commons, CC BY-SA 3.0.
+    {'name': 'Театр имени Андрея Миронова', 'floors': 7, 'prim': 0.4, 'last_level': 1000,
+     'image': 'https://upload.wikimedia.org/wikipedia/commons/f/f8/Rosenstein_house.jpg'},
+    # Фото: Stillhet, Wikimedia Commons, CC BY-SA 3.0.
+    {'name': 'Арка Главного штаба', 'floors': 12, 'prim': 0.8, 'last_level': 1000,
+     'image': 'https://upload.wikimedia.org/wikipedia/commons/6/6d/%D0%90%D1%80%D0%BA%D0%B0_%D0%B3%D0%BB%D0%B0%D0%B2._%D1%88%D1%82%D0%B0%D0%B1%D0%B0.jpg'},
 ]
 
 LEVELS = [
